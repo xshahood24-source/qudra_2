@@ -31,7 +31,7 @@ class _LightingStatusScreenState extends State<LightingStatusScreen> {
   void initState() {
     super.initState();
     _initializeCamera();
-    _voiceAssistant.initialize();
+    _voiceAssistant.init();
     _voiceAssistant.startListening();
   }
 

@@ -2,8 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:qudra_2/screens/guardian_login.dart';
 import 'package:qudra_2/screens/login_screen.dart';
-// import 'auth/login_screen.dart';
-// import 'auth/guardian_login.dart';
+import '../services/language_service.dart';
 
 class SelectRoleScreen extends StatefulWidget {
   const SelectRoleScreen({super.key});
@@ -14,6 +13,7 @@ class SelectRoleScreen extends StatefulWidget {
 
 class _SelectRoleScreenState extends State<SelectRoleScreen> {
   String? selectedRole;
+  final LanguageService _langService = LanguageService(); // استدعاء خدمة اللغة
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +24,25 @@ class _SelectRoleScreenState extends State<SelectRoleScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Column(
             children: [
-              const SizedBox(height: 60),
+              Align(
+                alignment: Alignment.topRight,
+                child: ListenableBuilder(
+                  listenable: _langService,
+                  builder: (context, _) => TextButton.icon(
+                    onPressed: () {
+                      String newLang =
+                          _langService.languageCode == 'ar' ? 'en' : 'ar';
+                      _langService.updateLanguage(newLang);
+                    },
+                    icon: const Icon(Icons.language, color: Color(0xFF2D5357)),
+                    label: Text(
+                      _langService.currentLanguageName,
+                      style: const TextStyle(color: Color(0xFF2D5357)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
               const Text(
                 "Select Your\nApp Path",
                 textAlign: TextAlign.center,
@@ -80,17 +98,15 @@ class _SelectRoleScreenState extends State<SelectRoleScreen> {
                     disabledBackgroundColor:
                         const Color(0xFF2D5357).withOpacity(0.4),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
+                        borderRadius: BorderRadius.circular(15)),
                     elevation: 0,
                   ),
                   child: const Text(
                     "Continue",
                     style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        fontSize: 18,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -102,14 +118,12 @@ class _SelectRoleScreenState extends State<SelectRoleScreen> {
     );
   }
 
-  Widget _roleOption({
-    required String title,
-    required String roleValue,
-    required String imagePath,
-    required IconData icon,
-  }) {
+  Widget _roleOption(
+      {required String title,
+      required String roleValue,
+      required String imagePath,
+      required IconData icon}) {
     bool isSelected = selectedRole == roleValue;
-
     return GestureDetector(
       onTap: () => setState(() => selectedRole = roleValue),
       child: AnimatedContainer(
@@ -125,10 +139,9 @@ class _SelectRoleScreenState extends State<SelectRoleScreen> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 4)),
           ],
         ),
         child: Padding(
@@ -166,14 +179,11 @@ class _SelectRoleScreenState extends State<SelectRoleScreen> {
                         : null,
                   ),
                   const SizedBox(width: 12),
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black,
-                    ),
-                  ),
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black)),
                 ],
               ),
             ],

@@ -32,7 +32,7 @@ class _AnimalDetectionScreenState extends State<AnimalDetectionScreen> {
   void initState() {
     super.initState();
     _initializeCamera();
-    _voiceAssistant.initialize();
+    _voiceAssistant.init();
     _voiceAssistant.startListening();
   }
 

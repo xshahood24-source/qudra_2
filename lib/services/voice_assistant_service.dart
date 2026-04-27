@@ -1,93 +1,115 @@
-// lib/services/voice_assistant_service.dart
-import 'package:logging/logging.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:flutter/material.dart';
+
+// ✅ تعريف الـ navigatorKey هنا ليكون متاحاً في كل مكان
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class VoiceAssistantService {
-  final SpeechToText _speechToText = SpeechToText();
-  final FlutterTts _flutterTts = FlutterTts();
-  final Logger _logger = Logger('VoiceAssistantService');
+  // ✅ Singleton
+  static final VoiceAssistantService _instance =
+      VoiceAssistantService._internal();
+  factory VoiceAssistantService() => _instance;
+  VoiceAssistantService._internal();
+
+  // 🎤 Speech To Text
+  final stt.SpeechToText _speech = stt.SpeechToText();
+
+  // 🔊 Text To Speech
+  final FlutterTts _tts = FlutterTts();
 
   bool _isListening = false;
-  bool _isInitialized = false;
 
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-
-    await _speechToText.initialize(
-      onError: (error) {
-        _logger.warning('Speech error: $error');
-      },
-      onStatus: (status) {
-        _logger.info('Speech status: $status');
-      },
-    );
-
-    await _flutterTts.setLanguage('en-US');
-    await _flutterTts.setSpeechRate(0.45);
-    await _flutterTts.setPitch(1.0);
-    await _flutterTts.awaitSpeakCompletion(true);
-
-    _isInitialized = true;
-    _logger.info('VoiceAssistantService initialized successfully');
+  // =========================
+  // 🚀 INIT (إضافة الـ async والـ await لضمان الجاهزية)
+  // =========================
+  Future<void> init() async {
+    await _initTTS();
+    await _initSTT();
+    startListening();
   }
 
-  Future<void> startListening() async {
-    if (_isListening || !_isInitialized) return;
+  // =========================
+  // 🔊 TTS Setup
+  // =========================
+  Future<void> _initTTS() async {
+    await _tts.setLanguage("ar-EG"); // عربي
+    await _tts.setSpeechRate(0.5);
+  }
+
+  // =========================
+  // 🎤 STT Setup
+  // =========================
+  Future<void> _initSTT() async {
+    bool available = await _speech.initialize(
+      onStatus: (status) => print('Status: $status'),
+      onError: (error) => print('Error: $error'),
+    );
+    if (!available) {
+      print("The user has denied the use of speech recognition.");
+    }
+  }
+
+  // =========================
+  // 🎤 Start Listening
+  // =========================
+  void startListening() async {
+    if (_isListening) return;
 
     _isListening = true;
 
-    await _speechToText.listen(
-      // ignore: deprecated_member_use
-      listenMode: ListenMode.confirmation,
+    await _speech.listen(
       onResult: (result) {
+        String text = result.recognizedWords.toLowerCase();
+        print("🎤 Heard: $text");
+
+        // إذا انتهى التعرف على الكلمات، نعالج الأمر
         if (result.finalResult) {
-          final command = result.recognizedWords.toLowerCase().trim();
-          _logger.info('User said: $command');
-          _processVoiceCommand(command);
+          handleCommand(text);
+          _isListening = false; // إعادة التعيين ليتمكن من الاستماع مرة أخرى
+          startListening();
         }
       },
     );
   }
 
-  void stopListening() {
-    if (!_isListening) return;
-    _speechToText.stop();
-    _isListening = false;
-    _logger.info('Stopped listening');
-  }
-
-  Future<void> speak(String text) async {
-    if (!_isInitialized) return;
-    await _flutterTts.stop();
-    await _flutterTts.speak(text);
-    _logger.info('Speaking: $text');
-  }
-
-  void _processVoiceCommand(String command) {
-    if (command.contains('animal')) {
-      speak('Scanning for animals');
-    } else if (command.contains('person') || command.contains('people')) {
-      speak('Scanning for people');
-    } else if (command.contains('light')) {
-      speak('Checking lighting status');
-    } else if (command.contains('color')) {
-      speak('Scanning for colors');
-    } else if (command.contains('help')) {
-      speak('You can say animal, person, light, color, or back');
-    } else if (command.contains('back')) {
-      speak('Going back');
+  // =========================
+  // 🧠 Handle Commands
+  // =========================
+  void handleCommand(String command) {
+    if (command.contains("home") || command.contains("الرئيسية")) {
+      speak("فتح الصفحة الرئيسية");
+      navigatorKey.currentState?.pushNamed('/home');
+    } else if (command.contains("settings") || command.contains("الإعدادات")) {
+      speak("فتح الإعدادات");
+      navigatorKey.currentState?.pushNamed('/settings');
+    } else if (command.contains("back") || command.contains("رجوع")) {
+      speak("رجوع");
+      navigatorKey.currentState?.pop();
     } else {
-      speak('Command not recognized');
+      // يمكنك تركها فارغة إذا لا تريد أن يتحدث البرنامج عند كل صوت عشوائي
+      print("Command not recognized");
     }
   }
 
-  bool get isListening => _isListening;
+  // =========================
+  // 🔊 Speak
+  // =========================
+  Future<void> speak(String text) async {
+    await _tts.speak(text);
+  }
 
-  /// تنظيف
+  // =========================
+  // ⛔ Stop & Dispose (تمت إضافة Dispose هنا)
+  // =========================
+  void stopListening() async {
+    _isListening = false;
+    await _speech.stop();
+  }
+
   void dispose() {
-    _speechToText.cancel();
-    _flutterTts.stop();
-    _logger.info('VoiceAssistantService disposed');
+    stopListening();
+    _tts.stop();
+    print("✅ VoiceAssistantService Disposed");
   }
 }

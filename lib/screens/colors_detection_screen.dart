@@ -29,7 +29,7 @@ class _ColorsDetectionScreenState extends State<ColorsDetectionScreen> {
   void initState() {
     super.initState();
     _initializeCamera();
-    _voiceAssistant.initialize();
+    _voiceAssistant.init();
     _voiceAssistant.startListening();
   }
 
