@@ -2,11 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:qudra_2/screens/guard_profile.dart';
-// import 'package:qudra_2/screens/guardian_login.dart';
 import 'select_role_screen.dart';
 import 'home_screen.dart';
-// import 'guard_profile.dart';
+import 'guard_profile.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});

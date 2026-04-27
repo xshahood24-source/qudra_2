@@ -1,7 +1,10 @@
 // lib/screens/user_profile.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -11,15 +14,16 @@ class UserProfile extends StatefulWidget {
 }
 
 class _UserProfileState extends State<UserProfile> {
-  // ─── Controllers ───
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
 
-  // ─── State ───
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
   bool _isEditing = false;
   bool _isSaving = false;
+  bool _isUploadingImage = false;
+  File? _pickedImageFile;
   String? _errorMessage;
 
   @override
@@ -35,13 +39,11 @@ class _UserProfileState extends State<UserProfile> {
     super.dispose();
   }
 
-  // ─── جيب البيانات من Firestore ───
   Future<void> _loadUserData() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
-
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) {
@@ -51,7 +53,6 @@ class _UserProfileState extends State<UserProfile> {
 
       final doc =
           await FirebaseFirestore.instance.collection('users').doc(uid).get();
-
       if (!doc.exists) {
         setState(() => _errorMessage = 'User data not found');
         return;
@@ -60,7 +61,6 @@ class _UserProfileState extends State<UserProfile> {
       final data = doc.data()!;
       setState(() {
         _userData = data;
-        // حشو الـ controllers بالبيانات الحالية
         _nameController.text = data['name'] ?? '';
         _phoneController.text = data['phone'] ?? '';
       });
@@ -71,11 +71,176 @@ class _UserProfileState extends State<UserProfile> {
     }
   }
 
-  // ─── حفظ التعديلات في Firestore ───
+  // ─── اختيار صورة ───
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? picked = await _picker.pickImage(
+        source: source,
+        imageQuality: 80,
+        maxWidth: 600,
+        maxHeight: 600,
+      );
+      if (picked == null) return;
+      setState(() => _pickedImageFile = File(picked.path));
+      await _uploadImage();
+    } catch (e) {
+      _showSnackBar('Error picking image: $e', isError: true);
+    }
+  }
+
+  // ─── رفع الصورة على Firebase Storage ───
+  Future<void> _uploadImage() async {
+    if (_pickedImageFile == null) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => _isUploadingImage = true);
+    try {
+      final ref =
+          FirebaseStorage.instance.ref().child('profile_images/$uid.jpg');
+
+      await ref.putFile(_pickedImageFile!);
+      final downloadUrl = await ref.getDownloadURL();
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'photoUrl': downloadUrl});
+
+      setState(() => _userData?['photoUrl'] = downloadUrl);
+      _showSnackBar('Profile photo updated! ✅');
+    } catch (e) {
+      _showSnackBar('Error uploading: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
+    }
+  }
+
+  // ─── حذف الصورة ───
+  Future<void> _removePhoto() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    setState(() => _isUploadingImage = true);
+    try {
+      try {
+        await FirebaseStorage.instance
+            .ref()
+            .child('profile_images/$uid.jpg')
+            .delete();
+      } catch (_) {}
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'photoUrl': FieldValue.delete()});
+
+      setState(() {
+        _userData?.remove('photoUrl');
+        _pickedImageFile = null;
+      });
+      _showSnackBar('Photo removed');
+    } catch (e) {
+      _showSnackBar('Error: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
+    }
+  }
+
+  void _showImageSourceSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('Change Profile Photo',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              _sheetOption(
+                icon: Icons.camera_alt_outlined,
+                label: 'Take a Photo',
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              const SizedBox(height: 10),
+              _sheetOption(
+                icon: Icons.photo_library_outlined,
+                label: 'Choose from Gallery',
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+              if (_userData?['photoUrl'] != null) ...[
+                const SizedBox(height: 10),
+                _sheetOption(
+                  icon: Icons.delete_outline,
+                  label: 'Remove Photo',
+                  color: Colors.red,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _removePhoto();
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    final c = color ?? const Color(0xFF2D5357);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        decoration: BoxDecoration(
+          color: c.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: c, size: 22),
+            const SizedBox(width: 14),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w600, color: c)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveChanges() async {
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
-
     if (name.isEmpty) {
       _showSnackBar('Name cannot be empty', isError: true);
       return;
@@ -86,25 +251,20 @@ class _UserProfileState extends State<UserProfile> {
     }
 
     setState(() => _isSaving = true);
-
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) return;
-
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'name': name,
         'phone': phone,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-
-      // حدّث الـ local state
       setState(() {
         _userData?['name'] = name;
         _userData?['phone'] = phone;
         _isEditing = false;
       });
-
-      _showSnackBar('Profile updated successfully! ✅');
+      _showSnackBar('Profile updated! ✅');
     } catch (e) {
       _showSnackBar('Error saving: $e', isError: true);
     } finally {
@@ -112,7 +272,6 @@ class _UserProfileState extends State<UserProfile> {
     }
   }
 
-  // ─── إلغاء التعديل ───
   void _cancelEdit() {
     _nameController.text = _userData?['name'] ?? '';
     _phoneController.text = _userData?['phone'] ?? '';
@@ -120,49 +279,39 @@ class _UserProfileState extends State<UserProfile> {
   }
 
   void _showSnackBar(String msg, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: isError ? Colors.red : const Color(0xFF2D5357),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? Colors.red : const Color(0xFF2D5357),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
   }
 
-  // ─── Build ───
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: Colors.white,
-        body: Center(
-          child: CircularProgressIndicator(color: Color(0xFF2D5357)),
-        ),
+        body:
+            Center(child: CircularProgressIndicator(color: Color(0xFF2D5357))),
       );
     }
-
     if (_errorMessage != null) {
       return Scaffold(
         appBar: _buildAppBar(),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 60, color: Colors.red),
-              const SizedBox(height: 16),
-              Text(_errorMessage!,
-                  style: const TextStyle(color: Colors.grey, fontSize: 16)),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _loadUserData,
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D5357)),
-                child:
-                    const Text('Retry', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Icon(Icons.error_outline, size: 60, color: Colors.red),
+            const SizedBox(height: 16),
+            Text(_errorMessage!, style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _loadUserData,
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D5357)),
+              child: const Text('Retry', style: TextStyle(color: Colors.white)),
+            ),
+          ]),
         ),
       );
     }
@@ -171,6 +320,7 @@ class _UserProfileState extends State<UserProfile> {
     final email = _userData?['email'] ?? '';
     final phone = _userData?['phone'] ?? '';
     final role = _userData?['role'] ?? 'user';
+    final photoUrl = _userData?['photoUrl'] as String?;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
@@ -178,23 +328,15 @@ class _UserProfileState extends State<UserProfile> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // ─── Header ───
-            _buildHeader(name, role),
-
+            _buildHeader(name: name, role: role, photoUrl: photoUrl),
             const SizedBox(height: 24),
-
-            // ─── Info Card ───
-            _buildInfoCard(email: email, phone: phone, name: name),
-
+            _buildInfoCard(email: email, name: name, phone: phone),
             const SizedBox(height: 16),
-
-            // ─── Edit / Save Buttons ───
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child:
                   _isEditing ? _buildSaveCancelButtons() : _buildEditButton(),
             ),
-
             const SizedBox(height: 30),
           ],
         ),
@@ -202,39 +344,37 @@ class _UserProfileState extends State<UserProfile> {
     );
   }
 
-  // ─── AppBar ───
-  AppBar _buildAppBar() {
-    return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      title: const Text(
-        'My Profile',
-        style: TextStyle(
-            color: Colors.black, fontWeight: FontWeight.bold, fontSize: 20),
-      ),
-      centerTitle: true,
-      leading: Padding(
-        padding: const EdgeInsets.all(10.0),
-        child: InkWell(
-          onTap: () => Navigator.pop(context),
-          borderRadius: BorderRadius.circular(30),
-          child: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.black26, width: 1.2),
+  AppBar _buildAppBar() => AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text('My Profile',
+            style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 20)),
+        leading: Padding(
+          padding: const EdgeInsets.all(10),
+          child: InkWell(
+            onTap: () => Navigator.pop(context),
+            borderRadius: BorderRadius.circular(30),
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.black26, width: 1.2),
+              ),
+              child:
+                  const Icon(Icons.arrow_back, color: Colors.black, size: 18),
             ),
-            child: const Icon(Icons.arrow_back, color: Colors.black, size: 18),
           ),
         ),
-      ),
-    );
-  }
+      );
 
-  // ─── Header Section ───
-  Widget _buildHeader(String name, String role) {
+  Widget _buildHeader(
+      {required String name, required String role, String? photoUrl}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
       decoration: const BoxDecoration(
         color: Color(0xFF2D5357),
         borderRadius: BorderRadius.only(
@@ -244,35 +384,70 @@ class _UserProfileState extends State<UserProfile> {
       ),
       child: Column(
         children: [
-          // Avatar دائري باللون والحرف الأول
-          Container(
-            width: 90,
-            height: 90,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withOpacity(0.15),
-              border: Border.all(color: Colors.white54, width: 2),
-            ),
-            child: Center(
-              child: Text(
-                name.isNotEmpty ? name[0].toUpperCase() : 'U',
-                style: const TextStyle(
-                  fontSize: 42,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
+          // ─── Avatar + Camera Icon ───
+          Stack(
+            children: [
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white60, width: 3),
+                  color: Colors.white.withOpacity(0.15),
+                ),
+                child: ClipOval(
+                  child: _isUploadingImage
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5))
+                      : _pickedImageFile != null
+                          ? Image.file(_pickedImageFile!,
+                              fit: BoxFit.cover, width: 100, height: 100)
+                          : photoUrl != null
+                              ? Image.network(photoUrl,
+                                  fit: BoxFit.cover,
+                                  width: 100,
+                                  height: 100,
+                                  errorBuilder: (_, __, ___) =>
+                                      _fallbackAvatar(name))
+                              : _fallbackAvatar(name),
                 ),
               ),
-            ),
+              // زرار الكاميرا
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: GestureDetector(
+                  onTap: _isUploadingImage ? null : _showImageSourceSheet,
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      border:
+                          Border.all(color: const Color(0xFF2D5357), width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.camera_alt,
+                        size: 16, color: Color(0xFF2D5357)),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
-          Text(
-            name,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          Text(name,
+              style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white)),
           const SizedBox(height: 6),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
@@ -281,12 +456,11 @@ class _UserProfileState extends State<UserProfile> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              role[0].toUpperCase() + role.substring(1), // "User"
+              role[0].toUpperCase() + role.substring(1),
               style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500),
             ),
           ),
         ],
@@ -294,11 +468,18 @@ class _UserProfileState extends State<UserProfile> {
     );
   }
 
-  // ─── Info Card ───
+  Widget _fallbackAvatar(String name) => Center(
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : 'U',
+          style: const TextStyle(
+              fontSize: 42, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+      );
+
   Widget _buildInfoCard({
     required String email,
-    required String phone,
     required String name,
+    required String phone,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -308,74 +489,52 @@ class _UserProfileState extends State<UserProfile> {
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 3))
           ],
         ),
         child: Column(
           children: [
-            // ─── Title ───
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 18, 20, 12),
-              child: Row(
-                children: [
-                  Icon(Icons.person_outline,
-                      color: Color(0xFF2D5357), size: 22),
-                  SizedBox(width: 10),
-                  Text(
-                    'Account Information',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
+              child: Row(children: [
+                Icon(Icons.person_outline, color: Color(0xFF2D5357), size: 22),
+                SizedBox(width: 10),
+                Text('Account Information',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ]),
             ),
             const Divider(height: 1, color: Color(0xFFF0F0F0)),
-
-            // Email — دايمًا read-only مش ممكن تغييره
             _buildReadOnlyField(
-              icon: Icons.email_outlined,
-              label: 'Email',
-              value: email,
-              note: 'Cannot be changed',
-            ),
+                icon: Icons.email_outlined,
+                label: 'Email',
+                value: email,
+                note: 'Cannot be changed'),
             const Divider(
                 height: 1, indent: 20, endIndent: 20, color: Color(0xFFF0F0F0)),
-
-            // Name — editable
             _isEditing
                 ? _buildEditableField(
                     icon: Icons.badge_outlined,
                     label: 'Full Name',
-                    controller: _nameController,
-                  )
+                    controller: _nameController)
                 : _buildReadOnlyField(
                     icon: Icons.badge_outlined,
                     label: 'Full Name',
-                    value: name,
-                  ),
+                    value: name),
             const Divider(
                 height: 1, indent: 20, endIndent: 20, color: Color(0xFFF0F0F0)),
-
-            // Phone — editable
             _isEditing
                 ? _buildEditableField(
                     icon: Icons.phone_outlined,
                     label: 'Phone Number',
                     controller: _phoneController,
-                    keyboardType: TextInputType.phone,
-                  )
+                    keyboardType: TextInputType.phone)
                 : _buildReadOnlyField(
                     icon: Icons.phone_outlined,
                     label: 'Phone Number',
-                    value: phone,
-                  ),
-
+                    value: phone),
             const SizedBox(height: 8),
           ],
         ),
@@ -383,57 +542,43 @@ class _UserProfileState extends State<UserProfile> {
     );
   }
 
-  // ─── Read-only Field ───
   Widget _buildReadOnlyField({
     required IconData icon,
     required String label,
     required String value,
     String? note,
+    Color? valueColor,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 20, color: const Color(0xFF2D5357)),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, size: 20, color: const Color(0xFF2D5357)),
+        const SizedBox(width: 14),
+        Expanded(
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label,
+                style: const TextStyle(
                     fontSize: 12,
                     color: Colors.grey,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  value.isEmpty ? '—' : value,
-                  style: const TextStyle(
+                    fontWeight: FontWeight.w500)),
+            const SizedBox(height: 3),
+            Text(value.isEmpty ? '—' : value,
+                style: TextStyle(
                     fontSize: 15,
-                    color: Colors.black87,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (note != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    note,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
+                    color: valueColor ?? Colors.black87,
+                    fontWeight: FontWeight.w600)),
+            if (note != null) ...[
+              const SizedBox(height: 2),
+              Text(note,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            ],
+          ]),
+        ),
+      ]),
     );
   }
 
-  // ─── Editable Field ───
   Widget _buildEditableField({
     required IconData icon,
     required String label,
@@ -442,69 +587,59 @@ class _UserProfileState extends State<UserProfile> {
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(icon, size: 20, color: const Color(0xFF2D5357)),
-          const SizedBox(width: 14),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              keyboardType: keyboardType,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-              decoration: InputDecoration(
-                labelText: label,
-                labelStyle: const TextStyle(color: Colors.grey, fontSize: 12),
-                isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                filled: true,
-                fillColor: const Color(0xFFF8F8F8),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade200),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide:
-                      const BorderSide(color: Color(0xFF2D5357), width: 1.5),
-                ),
+      child: Row(children: [
+        Icon(icon, size: 20, color: const Color(0xFF2D5357)),
+        const SizedBox(width: 14),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            decoration: InputDecoration(
+              labelText: label,
+              labelStyle: const TextStyle(color: Colors.grey, fontSize: 12),
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              filled: true,
+              fillColor: const Color(0xFFF8F8F8),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade200),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide:
+                    const BorderSide(color: Color(0xFF2D5357), width: 1.5),
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
-  // ─── Edit Button ───
-  Widget _buildEditButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: ElevatedButton.icon(
-        onPressed: () => setState(() => _isEditing = true),
-        icon: const Icon(Icons.edit_outlined, color: Colors.white, size: 20),
-        label: const Text(
-          'Edit Profile',
-          style: TextStyle(
-              fontSize: 16, color: Colors.white, fontWeight: FontWeight.w600),
+  Widget _buildEditButton() => SizedBox(
+        width: double.infinity,
+        height: 54,
+        child: ElevatedButton.icon(
+          onPressed: () => setState(() => _isEditing = true),
+          icon: const Icon(Icons.edit_outlined, color: Colors.white, size: 20),
+          label: const Text('Edit Profile',
+              style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF2D5357),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            elevation: 0,
+          ),
         ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF2D5357),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          elevation: 0,
-        ),
-      ),
-    );
-  }
+      );
 
-  // ─── Save / Cancel Buttons ───
-  Widget _buildSaveCancelButtons() {
-    return Row(
-      children: [
-        // Cancel
+  Widget _buildSaveCancelButtons() => Row(children: [
         Expanded(
           child: SizedBox(
             height: 54,
@@ -515,18 +650,15 @@ class _UserProfileState extends State<UserProfile> {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15)),
               ),
-              child: const Text(
-                'Cancel',
-                style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600),
-              ),
+              child: const Text('Cancel',
+                  style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600)),
             ),
           ),
         ),
         const SizedBox(width: 12),
-        // Save
         Expanded(
           child: SizedBox(
             height: 54,
@@ -543,19 +675,14 @@ class _UserProfileState extends State<UserProfile> {
                       width: 22,
                       height: 22,
                       child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2.5),
-                    )
-                  : const Text(
-                      'Save',
+                          color: Colors.white, strokeWidth: 2.5))
+                  : const Text('Save',
                       style: TextStyle(
                           color: Colors.white,
                           fontSize: 16,
-                          fontWeight: FontWeight.w600),
-                    ),
+                          fontWeight: FontWeight.w600)),
             ),
           ),
         ),
-      ],
-    );
-  }
+      ]);
 }
