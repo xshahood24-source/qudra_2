@@ -55,7 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _initMLKit();
     await _initCamera();
 
-    // تفعيل المساعد الصوتي فور فتح الشاشة
+    // تفعيل المساعد الصوت مع فتح الشاشة
     await _voiceAssistant.init();
     await _voiceAssistant.speak(_getWelcomeMessage());
     _voiceAssistant.startListening();
@@ -140,7 +140,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ─── الوظيفة الرئيسية: التقاط + تحليل ───
   Future<void> _captureAndAnalyze() async {
     if (_cameraController == null ||
         !_cameraController!.value.isInitialized ||
@@ -186,7 +185,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // (دوال ML Kit و Light و Color Detection تبقى كما هي دون تغيير)
   Future<String> _detectObjects(InputImage image) async {
     try {
       final objects = await _objectDetector!.processImage(image);

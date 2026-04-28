@@ -1,16 +1,12 @@
 // lib/screens/auth/sign_up_screen.dart
 import 'package:flutter/material.dart';
 import 'package:qudra_2/services/auth_service.dart';
-import 'package:qudra_2/screens/home_screen.dart';
 import '../../constants/app_colors.dart';
+import 'otp_screen.dart'; // ← الجديد
 
 class SignUpScreen extends StatefulWidget {
   final String role;
-
-  const SignUpScreen({
-    super.key,
-    required this.role,
-  });
+  const SignUpScreen({super.key, required this.role});
 
   @override
   State<SignUpScreen> createState() => _SignUpScreenState();
@@ -19,12 +15,11 @@ class SignUpScreen extends StatefulWidget {
 class _SignUpScreenState extends State<SignUpScreen> {
   final AuthService _authService = AuthService();
 
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController =
-      TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  final _phoneController = TextEditingController();
 
   bool _obscureText = true;
   bool _obscureConfirmText = true;
@@ -42,16 +37,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
       hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
       filled: true,
       fillColor: Colors.white,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Colors.grey),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide:
-            const BorderSide(color: AppColors.primaryDark, width: 1.5),
+        borderSide: const BorderSide(color: AppColors.primaryDark, width: 1.5),
       ),
       suffixIcon: suffixIcon,
     );
@@ -68,22 +61,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   Future<void> _handleSignUp() async {
-    String name = _nameController.text.trim();
-    String email = _emailController.text.trim();
-    String password = _passwordController.text.trim();
-    String confirmPassword = _confirmPasswordController.text.trim();
-    String phone = _phoneController.text.trim();
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
+    final phone = _phoneController.text.trim();
 
     if (name.isEmpty || email.isEmpty || password.isEmpty || phone.isEmpty) {
       _showSnackBar('All fields are required');
       return;
     }
-
     if (password != confirmPassword) {
       _showSnackBar('Passwords do not match');
       return;
     }
-
     if (password.length < 6) {
       _showSnackBar('Password must be at least 6 characters');
       return;
@@ -92,20 +83,27 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // 1. إنشاء الحساب في Firebase
       final result = await _authService.signUpWithEmailAndPassword(
         email: email,
         password: password,
         name: name,
         phone: phone,
-        role: widget.role, // 'user'
+        role: widget.role,
       );
 
       if (result != null && mounted) {
-        // User بيروح على HomeScreen بعد الـ Sign Up
-        Navigator.pushAndRemoveUntil(
+        // 2. بعد إنشاء الحساب روح للـ OTP للتحقق من رقم التليفون
+        final fullPhone = phone.startsWith('+') ? phone : '+2$phone';
+
+        Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-          (route) => false,
+          MaterialPageRoute(
+            builder: (_) => OtpScreen(
+              phoneNumber: fullPhone,
+              role: widget.role,
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -133,8 +131,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
               const SizedBox(height: 20),
               const Text(
                 'Sign Up',
-                style: TextStyle(
-                    fontSize: 32, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(
@@ -155,6 +152,35 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   keyboardType: TextInputType.emailAddress,
                   decoration: inputDecoration('Enter your email')),
               const SizedBox(height: 20),
+              const Text('Phone Number', style: labelStyle),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  hintText: '01012345678',
+                  hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
+                  prefixText: '+20  ',
+                  prefixStyle: const TextStyle(
+                      color: AppColors.primaryDark,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.grey),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                        color: AppColors.primaryDark, width: 1.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
               const Text('Password', style: labelStyle),
               const SizedBox(height: 8),
               TextField(
@@ -163,9 +189,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 decoration: inputDecoration(
                   'Create a password',
                   suffixIcon: IconButton(
-                    icon: Icon(_obscureText
-                        ? Icons.visibility_off
-                        : Icons.visibility),
+                    icon: Icon(
+                        _obscureText ? Icons.visibility_off : Icons.visibility),
                     onPressed: () =>
                         setState(() => _obscureText = !_obscureText),
                   ),
@@ -188,14 +213,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              const Text('Phone Number', style: labelStyle),
-              const SizedBox(height: 8),
-              TextField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration:
-                      inputDecoration('Enter your phone number')),
               const SizedBox(height: 40),
               SizedBox(
                 width: double.infinity,
@@ -208,8 +225,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 18),
                   ),
                   child: _isLoading
-                      ? const CircularProgressIndicator(
-                          color: Colors.white)
+                      ? const CircularProgressIndicator(color: Colors.white)
                       : const Text(
                           'Create Account',
                           style: TextStyle(

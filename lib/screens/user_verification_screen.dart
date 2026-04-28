@@ -318,7 +318,8 @@ class _UserVerificationScreenState extends State<UserVerificationScreen> {
             ),
             disabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(15),
-              borderSide: BorderSide(color: Colors.grey.shade200),
+              borderSide:
+                  BorderSide(color: const Color.fromARGB(255, 250, 249, 249)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(15),
