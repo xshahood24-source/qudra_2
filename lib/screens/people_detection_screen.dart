@@ -1,9 +1,7 @@
-// lib/screens/people_detection_screen.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
-import '../services/voice_assistant_service.dart';
-
+import 'qudra_api_service';
 class PeopleDetectionScreen extends StatefulWidget {
   const PeopleDetectionScreen({super.key});
 
@@ -12,170 +10,112 @@ class PeopleDetectionScreen extends StatefulWidget {
 }
 
 class _PeopleDetectionScreenState extends State<PeopleDetectionScreen> {
-  List<CameraDescription>? cameras;
-  CameraController? controller;
-
-  final ImageLabeler _imageLabeler = ImageLabeler(
-    options: ImageLabelerOptions(confidenceThreshold: 0.5),
-  );
-
-  final VoiceAssistantService _voiceAssistant = VoiceAssistantService();
-
-  String _lastDetectedPerson = 'No person detected yet.';
-  bool _isProcessing = false; // لمنع المعالجة المتكررة
+  CameraController? _controller;
+  final _apiService = QudraApiService();
+  String _resultMessage = 'اضغط على الزر لتحليل المشهد';
+  bool _isProcessing = false;
 
   @override
   void initState() {
     super.initState();
     _initializeCamera();
-    _voiceAssistant.init();
-    _voiceAssistant.startListening();
   }
 
   Future<void> _initializeCamera() async {
-    try {
-      cameras = await availableCameras();
-      if (cameras != null && cameras!.isNotEmpty) {
-        controller = CameraController(
-          cameras![0],
-          ResolutionPreset.medium,
-          enableAudio: false,
-        );
-        await controller!.initialize();
-        _startImageStream();
-        setState(() {});
-      }
-    } catch (e) {
-      debugPrint('Camera init error: $e');
-    }
+    final cameras = await availableCameras();
+    if (cameras.isEmpty) return;
+    
+    _controller = CameraController(cameras[0], ResolutionPreset.medium);
+    await _controller!.initialize();
+    if (!mounted) return;
+    setState(() {});
   }
 
-  void _startImageStream() {
-    if (controller == null) return;
+  Future<void> _analyzeScene() async {
+    if (_controller == null || !_controller!.value.isInitialized || _isProcessing) return;
 
-    controller!.startImageStream((CameraImage image) async {
-      if (!mounted || _isProcessing) return;
-
+    setState(() {
       _isProcessing = true;
-
-      try {
-        final rotation =
-            controller!.description.lensDirection == CameraLensDirection.front
-                ? InputImageRotation.rotation90deg
-                : InputImageRotation.rotation270deg;
-
-        final inputImage = InputImage.fromBytes(
-          bytes: image.planes[0].bytes,
-          metadata: InputImageMetadata(
-            size: Size(
-              image.width.toDouble(),
-              image.height.toDouble(),
-            ),
-            rotation: rotation,
-            format: InputImageFormat.yuv420,
-            bytesPerRow: image.planes[0].bytesPerRow,
-          ),
-        );
-
-        final List<ImageLabel> labels =
-            await _imageLabeler.processImage(inputImage);
-
-        String detectedPerson = '';
-        double confidence = 0.0;
-
-        for (final label in labels) {
-          final entity = label.label.toLowerCase();
-          if (_isPerson(entity) && label.confidence > confidence) {
-            detectedPerson = entity;
-            confidence = label.confidence;
-          }
-        }
-
-        if (detectedPerson.isNotEmpty &&
-            detectedPerson != _lastDetectedPerson) {
-          _lastDetectedPerson = detectedPerson;
-
-          final message =
-              'Detected $detectedPerson with confidence ${(confidence * 100).toStringAsFixed(1)} percent';
-
-          _voiceAssistant.speak(message);
-          setState(() {});
-        }
-      } catch (e) {
-        debugPrint('Image processing error: $e');
-      } finally {
-        _isProcessing = false;
-      }
+      _resultMessage = 'جارِ التحليل، الرجاء الانتظار...';
     });
-  }
 
-  bool _isPerson(String entity) {
-    const peopleLabels = [
-      'person',
-      'human',
-      'man',
-      'woman',
-      'child',
-      'boy',
-      'girl',
-      'adult',
-      'elderly',
-      'baby',
-      'face',
-      'head',
-      'body',
-    ];
-    return peopleLabels.any((p) => entity.contains(p));
+    try {
+      // 1. التقاط الصورة
+      final XFile image = await _controller!.takePicture();
+      final File imageFile = File(image.path);
+
+      // 2. إرسال الصورة للـ API (الدوكر)
+      final String description = await _apiService.analyzeImage(imageFile);
+
+      setState(() {
+        _resultMessage = description;
+      });
+      
+    } catch (e) {
+      setState(() {
+        _resultMessage = 'حدث خطأ أثناء التحليل: $e';
+      });
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
   }
 
   @override
   void dispose() {
-    controller?.dispose();
-    _imageLabeler.close();
-    _voiceAssistant.stopListening();
-    _voiceAssistant.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('People Detection'),
-        backgroundColor: Colors.black87,
-        foregroundColor: Colors.white,
+        title: const Text('مشروع قدرة - كشف الأشياء'),
+        backgroundColor: Colors.orange,
       ),
-      body: Stack(
+      body: Column(
         children: [
-          if (controller != null && controller!.value.isInitialized)
-            CameraPreview(controller!)
-          else
-            const Center(child: CircularProgressIndicator()),
-          Positioned(
-            top: 50,
-            left: 0,
-            right: 0,
-            child: Container(
-              color: Colors.black54,
-              padding: const EdgeInsets.all(8),
-              child: Text(
-                _lastDetectedPerson,
-                style: const TextStyle(color: Colors.white, fontSize: 18),
-                textAlign: TextAlign.center,
-              ),
+          Expanded(
+            flex: 3,
+            child: AspectRatio(
+              aspectRatio: _controller!.value.aspectRatio,
+              child: CameraPreview(_controller!),
             ),
           ),
-          Positioned(
-            bottom: 40,
-            left: 0,
-            right: 0,
+          Expanded(
+            flex: 1,
             child: Container(
-              color: Colors.black54,
-              padding: const EdgeInsets.all(8),
-              child: const Text(
-                'Camera is analyzing people around you',
-                style: TextStyle(color: Colors.white),
-                textAlign: TextAlign.center,
+              padding: const EdgeInsets.all(20),
+              width: double.infinity,
+              color: Colors.black87,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _resultMessage,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    onPressed: _isProcessing ? null : _analyzeScene,
+                    icon: _isProcessing 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.remove_red_eye),
+                    label: Text(_isProcessing ? 'جاري التحليل...' : 'حلل المشهد الآن'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -183,4 +123,3 @@ class _PeopleDetectionScreenState extends State<PeopleDetectionScreen> {
       ),
     );
   }
-}
