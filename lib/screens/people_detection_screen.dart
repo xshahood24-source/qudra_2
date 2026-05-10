@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'qudra_api_service';
+import 'package:qudra_2/screens/qudra_api_service.dart';
 class PeopleDetectionScreen extends StatefulWidget {
   const PeopleDetectionScreen({super.key});
 
@@ -11,7 +11,7 @@ class PeopleDetectionScreen extends StatefulWidget {
 
 class _PeopleDetectionScreenState extends State<PeopleDetectionScreen> {
   CameraController? _controller;
-  final _apiService = QudraApiService();
+  final QudraApiService _apiService = QudraApiService();
   String _resultMessage = 'اضغط على الزر لتحليل المشهد';
   bool _isProcessing = false;
 
